@@ -22,10 +22,10 @@ stock_history = stock_obj.history(period="max")
 
 try:
     if(FileWrite):
-        with open('C:/Users/harsh/OneDrive/Documents/stockwatch/'+stock_name+'info_'+str(datetime.datetime.now()).replace(":","_").replace(" ","_")+'.csv', 'w') as f:
+        with open('C:/Users/harsh/OneDrive/Documents/stockwatch/data/'+stock_name+'info_'+str(datetime.datetime.now()).replace(":","_").replace(" ","_")+'.csv', 'w') as f:
             for key in stock_info.keys():
                 f.write("%s,%s\n"%(key,stock_info[key]))
-        with open('C:/Users/harsh/OneDrive/Documents/stockwatch/'+stock_name+'history_'+str(datetime.datetime.now()).replace(":","_").replace(" ","_")+'.csv', 'w') as f:
+        with open('C:/Users/harsh/OneDrive/Documents/stockwatch/data/'+stock_name+'history_'+str(datetime.datetime.now()).replace(":","_").replace(" ","_")+'.csv', 'w') as f:
             for key in stock_history.keys():
                 f.write("%s,%s\n"%(key,stock_history[key]))
         print("info exported")       

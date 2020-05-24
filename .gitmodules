@@ -1,0 +1,6 @@
+[submodule "stockwatch"]
+	path = stockwatch
+	url = C:\\Users\\harsh\\OneDrive\\Documents\\stockwatch
+[submodule "data"]
+	path = data
+	url = C:\\Users\\harsh\\OneDrive\\Documents\\stockwatch
