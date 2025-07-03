@@ -7,8 +7,19 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import sqlite3
 import smtplib
-from email.mime.text import MimeText
-from email.mime.multipart import MimeMultipart
+
+# Email imports with fallback
+try:
+    from email.mime.text import MIMEText as MimeText
+    from email.mime.multipart import MIMEMultipart as MimeMultipart
+except ImportError:
+    try:
+        from email.MIMEText import MIMEText as MimeText
+        from email.MIMEMultipart import MIMEMultipart as MimeMultipart
+    except ImportError:
+        # Fallback for older Python versions
+        from email.mime.text import MIMEText as MimeText
+        from email.mime.multipart import MIMEMultipart as MimeMultipart
 import requests
 from bs4 import BeautifulSoup
 import json
@@ -265,9 +276,18 @@ class EnhancedStockAnalyzer:
                    'PG', 'UNH', 'HD', 'MA', 'DIS', 'PYPL', 'ADBE', 'NFLX', 'CRM', 'NVDA'],
             'CANADA': ['SHOP.TO', 'RY.TO', 'TD.TO', 'BNS.TO', 'BMO.TO', 'CNR.TO', 'CP.TO', 
                       'SU.TO', 'CNQ.TO', 'ABX.TO', 'CCO.TO', 'ENB.TO', 'TRP.TO', 'FNV.TO', 'WPM.TO'],
-            'INDIA': ['RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 
+            'INDIA': [
+                     # NIFTY 50 Top Stocks
+                     'RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 
                      'HINDUNILVR.NS', 'ITC.NS', 'SBIN.NS', 'BHARTIARTL.NS', 'KOTAKBANK.NS',
-                     'LT.NS', 'ASIANPAINT.NS', 'MARUTI.NS', 'AXISBANK.NS', 'SUNPHARMA.NS']
+                     'LT.NS', 'ASIANPAINT.NS', 'MARUTI.NS', 'AXISBANK.NS', 'SUNPHARMA.NS',
+                     'NESTLEIND.NS', 'BAJFINANCE.NS', 'HCLTECH.NS', 'WIPRO.NS', 'ULTRACEMCO.NS',
+                     
+                     # SENSEX Top Stocks (Additional)
+                     'POWERGRID.NS', 'NTPC.NS', 'TATAMOTORS.NS', 'TATASTEEL.NS', 'M&M.NS',
+                     'TECHM.NS', 'BAJAJFINSV.NS', 'DRREDDY.NS', 'CIPLA.NS', 'DIVISLAB.NS',
+                     'ADANIPORTS.NS', 'JSWSTEEL.NS', 'TITAN.NS', 'GRASIM.NS', 'HEROMOTOCO.NS'
+                     ]
         }
         
     def get_stock_data(self, symbol: str) -> Dict:
