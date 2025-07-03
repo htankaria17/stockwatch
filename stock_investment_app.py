@@ -20,6 +20,32 @@ except ImportError:
         # Fallback for older Python versions
         from email.mime.text import MIMEText as MimeText
         from email.mime.multipart import MIMEMultipart as MimeMultipart
+
+# Application Version Information
+APP_VERSION = "2.1.0"
+APP_BUILD_DATE = "2024-12-21"
+APP_NAME = "AI-Powered Stock Investment Analyzer"
+VERSION_NOTES = {
+    "2.1.0": [
+        "Added SENSEX stocks to Indian market analysis (35 total stocks)",
+        "Fixed Python 3.13 email import compatibility",
+        "Enhanced ML prediction reporting and documentation",
+        "Added comprehensive version tracking system",
+        "Improved error handling and user experience"
+    ],
+    "2.0.0": [
+        "Complete GUI transformation with Streamlit",
+        "Integrated AI/ML prediction system",
+        "Multi-country support (US, Canada, India)",
+        "Email automation and scheduling",
+        "Portfolio optimization algorithms"
+    ],
+    "1.0.0": [
+        "Basic stock analysis script",
+        "Single stock analysis capability",
+        "Fundamental metrics calculation"
+    ]
+}
 import requests
 from bs4 import BeautifulSoup
 import json
@@ -525,23 +551,25 @@ class EmailNotifier:
     
     def _create_email_html(self, recommendations: List[Dict]) -> str:
         """Create HTML email content"""
-        html = """
+        html = f"""
         <html>
         <head>
             <style>
-                body { font-family: Arial, sans-serif; }
-                .header { background-color: #2E8B57; color: white; padding: 20px; text-align: center; }
-                .recommendation { border: 1px solid #ddd; margin: 10px; padding: 15px; border-radius: 5px; }
-                .strong-buy { border-left: 5px solid #28a745; }
-                .buy { border-left: 5px solid #007bff; }
-                .hold { border-left: 5px solid #ffc107; }
-                .metric { display: inline-block; margin: 5px 10px; }
+                body {{ font-family: Arial, sans-serif; }}
+                .header {{ background-color: #2E8B57; color: white; padding: 20px; text-align: center; }}
+                .recommendation {{ border: 1px solid #ddd; margin: 10px; padding: 15px; border-radius: 5px; }}
+                .strong-buy {{ border-left: 5px solid #28a745; }}
+                .buy {{ border-left: 5px solid #007bff; }}
+                .hold {{ border-left: 5px solid #ffc107; }}
+                .metric {{ display: inline-block; margin: 5px 10px; }}
+                .footer {{ background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #666; }}
             </style>
         </head>
         <body>
             <div class="header">
                 <h1>Your Daily Investment Recommendations</h1>
-                <p>Generated on """ + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + """</p>
+                <p>Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p style="font-size: 14px; opacity: 0.9;">{APP_NAME} v{APP_VERSION}</p>
             </div>
             
             <div style="padding: 20px;">
@@ -565,12 +593,15 @@ class EmailNotifier:
                 </div>
             """
         
-        html += """
+        html += f"""
             </div>
-            <footer style="text-align: center; padding: 20px; color: #666;">
-                <p>This is an automated recommendation based on fundamental and ML analysis. 
+            <div class="footer">
+                <p>This is an automated recommendation based on fundamental and ML analysis.<br>
                 Please conduct your own research before making investment decisions.</p>
-            </footer>
+                <hr style="margin: 10px 0; border: none; border-top: 1px solid #ddd;">
+                <p><strong>{APP_NAME}</strong> v{APP_VERSION} | Build Date: {APP_BUILD_DATE}</p>
+                <p>AI-Powered Investment Analysis | Machine Learning Enhanced Predictions</p>
+            </div>
         </body>
         </html>
         """
@@ -579,7 +610,7 @@ class EmailNotifier:
 
 def main():
     st.set_page_config(
-        page_title="AI-Powered Stock Investment Analyzer",
+        page_title=f"{APP_NAME} v{APP_VERSION}",
         page_icon="📈",
         layout="wide"
     )
@@ -591,6 +622,20 @@ def main():
     
     # Sidebar for user input
     st.sidebar.title("🚀 Investment Preferences")
+    
+    # Version info in sidebar
+    with st.sidebar.expander("ℹ️ App Information", expanded=False):
+        st.markdown(f"**Version:** {APP_VERSION}")
+        st.markdown(f"**Build Date:** {APP_BUILD_DATE}")
+        st.markdown(f"**Latest Updates:**")
+        for update in VERSION_NOTES[APP_VERSION]:
+            st.markdown(f"• {update}")
+        st.markdown("---")
+        st.markdown("**Previous Versions:**")
+        for version in sorted(VERSION_NOTES.keys(), reverse=True)[1:]:
+            with st.expander(f"Version {version}"):
+                for note in VERSION_NOTES[version]:
+                    st.markdown(f"• {note}")
     
     # User profile inputs
     user_name = st.sidebar.text_input("Full Name", value="")
@@ -638,8 +683,21 @@ def main():
                                                help="Use Gmail App Password, not regular password")
     
     # Main interface
-    st.title("🤖 AI-Powered Stock Investment Analyzer")
-    st.markdown("### Intelligent Investment Recommendations with Machine Learning")
+    st.title(f"🤖 {APP_NAME}")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown("### Intelligent Investment Recommendations with Machine Learning")
+    with col2:
+        st.markdown(f"**Version {APP_VERSION}** | {APP_BUILD_DATE}")
+    
+    # Version badge
+    st.markdown(f"""
+    <div style="text-align: right; margin-bottom: 20px;">
+        <span style="background-color: #28a745; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
+            v{APP_VERSION} - Latest
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Create tabs
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Analysis", "📈 Portfolio", "🤖 ML Insights", "⚙️ Settings"])
