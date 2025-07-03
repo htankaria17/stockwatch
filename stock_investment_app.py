@@ -22,28 +22,23 @@ except ImportError:
         from email.mime.multipart import MIMEMultipart as MimeMultipart
 
 # Application Version Information
-APP_VERSION = "2.1.0"
+APP_VERSION = "V0.1.1"
 APP_BUILD_DATE = "2024-12-21"
 APP_NAME = "AI-Powered Stock Investment Analyzer"
 VERSION_NOTES = {
-    "2.1.0": [
+    "V0.1.1": [
         "Added SENSEX stocks to Indian market analysis (35 total stocks)",
         "Fixed Python 3.13 email import compatibility",
         "Enhanced ML prediction reporting and documentation",
         "Added comprehensive version tracking system",
         "Improved error handling and user experience"
     ],
-    "2.0.0": [
+    "V0.1.0": [
         "Complete GUI transformation with Streamlit",
         "Integrated AI/ML prediction system",
         "Multi-country support (US, Canada, India)",
         "Email automation and scheduling",
         "Portfolio optimization algorithms"
-    ],
-    "1.0.0": [
-        "Basic stock analysis script",
-        "Single stock analysis capability",
-        "Fundamental metrics calculation"
     ]
 }
 import requests
@@ -630,12 +625,15 @@ def main():
         st.markdown(f"**Latest Updates:**")
         for update in VERSION_NOTES[APP_VERSION]:
             st.markdown(f"• {update}")
-        st.markdown("---")
-        st.markdown("**Previous Versions:**")
-        for version in sorted(VERSION_NOTES.keys(), reverse=True)[1:]:
-            with st.expander(f"Version {version}"):
+        
+        if len(VERSION_NOTES) > 1:
+            st.markdown("---")
+            st.markdown("**Previous Versions:**")
+            for version in sorted(VERSION_NOTES.keys(), reverse=True)[1:]:
+                st.markdown(f"**{version}:**")
                 for note in VERSION_NOTES[version]:
-                    st.markdown(f"• {note}")
+                    st.markdown(f"  • {note}")
+                st.markdown("")
     
     # User profile inputs
     user_name = st.sidebar.text_input("Full Name", value="")
@@ -700,7 +698,7 @@ def main():
     """, unsafe_allow_html=True)
     
     # Create tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Analysis", "📈 Portfolio", "🤖 ML Insights", "⚙️ Settings"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Analysis", "📈 Portfolio", "🤖 ML Insights", "⚙️ Settings", "ℹ️ About"])
     
     with tab1:
         st.subheader(f"Stock Analysis for {country}")
@@ -872,8 +870,91 @@ def main():
         st.markdown("""
         - **US**: Top 20 S&P 500 stocks
         - **Canada**: TSX top 15 stocks  
-        - **India**: NIFTY top 15 stocks
+        - **India**: NIFTY 50 + SENSEX stocks (35 total)
         """)
+    
+    with tab5:
+        st.subheader(f"ℹ️ About {APP_NAME}")
+        
+        # Version Information
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Current Version", APP_VERSION)
+        with col2:
+            st.metric("Build Date", APP_BUILD_DATE)
+        with col3:
+            st.metric("Total Markets", "3 Countries")
+        
+        st.markdown("---")
+        
+        # Latest Updates
+        st.subheader("🆕 Latest Updates")
+        for update in VERSION_NOTES[APP_VERSION]:
+            st.markdown(f"✅ {update}")
+        
+        # Version History
+        if len(VERSION_NOTES) > 1:
+            st.subheader("📋 Version History")
+            for version in sorted(VERSION_NOTES.keys(), reverse=True):
+                with st.expander(f"Version {version}" + (" (Current)" if version == APP_VERSION else "")):
+                    for note in VERSION_NOTES[version]:
+                        st.markdown(f"• {note}")
+        
+        st.markdown("---")
+        
+        # Technical Details
+        st.subheader("🔧 Technical Specifications")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+            **Frontend:**
+            - Streamlit Web Framework
+            - Plotly Interactive Charts
+            - Responsive UI Design
+            
+            **Data Sources:**
+            - Yahoo Finance API
+            - Real-time Market Data
+            - Financial Metrics
+            """)
+        
+        with col2:
+            st.markdown("""
+            **AI/ML Engine:**
+            - Gradient Boosting Regression
+            - 12 Feature Analysis
+            - Scikit-learn Framework
+            
+            **Backend:**
+            - SQLite Database
+            - Email Integration
+            - Portfolio Optimization
+            """)
+        
+        # Disclaimer
+        st.markdown("---")
+        st.subheader("⚠️ Important Disclaimer")
+        st.warning("""
+        This application provides educational analysis and should not be considered as financial advice. 
+        All investments carry risk of loss. Please conduct your own research and consult with licensed 
+        financial advisors before making investment decisions. Past performance does not guarantee future results.
+        """)
+        
+        # Credits
+        st.markdown("---")
+        st.subheader("👨‍💻 Credits")
+        st.markdown("""
+        - **Developer**: AI-Powered Stock Analysis System
+        - **ML Models**: Scikit-learn, Pandas, NumPy
+        - **Data Provider**: Yahoo Finance
+        - **UI Framework**: Streamlit
+        - **Visualization**: Plotly
+        """)
+        
+        st.markdown("---")
+        st.markdown(f"<center><i>© 2024 {APP_NAME} | All Rights Reserved</i></center>", 
+                   unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()

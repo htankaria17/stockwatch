@@ -1,4 +1,5 @@
 # Stock Investment App - Changes Summary
+## Version V0.1.1 Release
 
 ## Issues Addressed
 
