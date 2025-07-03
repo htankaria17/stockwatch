@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Launcher script for the AI-Powered Stock Investment Analyzer
+Version: V0.1.1 - Enhanced with SENSEX stocks and Python 3.13 compatibility
 """
 
 import subprocess
@@ -26,9 +27,10 @@ def run_streamlit_app():
 
 def main():
     """Main function"""
-    print("=" * 60)
-    print("🤖 AI-Powered Stock Investment Analyzer")
-    print("=" * 60)
+    print("=" * 70)
+    print("🤖 AI-Powered Stock Investment Analyzer V0.1.1")
+    print("📊 Enhanced: SENSEX stocks + Python 3.13 compatibility")
+    print("=" * 70)
     
     # Check if requirements file exists
     if not os.path.exists("requirements_gui.txt"):
