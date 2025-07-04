@@ -5,27 +5,45 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
+import pytz
 import sqlite3
 import smtplib
+import io
+import base64
 
 # Email imports with fallback
 try:
     from email.mime.text import MIMEText as MimeText
     from email.mime.multipart import MIMEMultipart as MimeMultipart
+    from email.mime.base import MIMEBase
+    from email import encoders
 except ImportError:
     try:
         from email.MIMEText import MIMEText as MimeText
         from email.MIMEMultipart import MIMEMultipart as MimeMultipart
+        from email.MIMEBase import MIMEBase
+        from email import encoders
     except ImportError:
         # Fallback for older Python versions
         from email.mime.text import MIMEText as MimeText
         from email.mime.multipart import MIMEMultipart as MimeMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
 
 # Application Version Information
-APP_VERSION = "V0.1.1"
+APP_VERSION = "V0.2.0"
 APP_BUILD_DATE = "2024-12-21"
 APP_NAME = "AI-Powered Stock Investment Analyzer"
+APP_CONCEPT_OWNER = "Harshal Tankaria"
 VERSION_NOTES = {
+    "V0.2.0": [
+        "Added Day Trading Mode with buy/sell triggers for top 5 stocks",
+        "Fixed email functionality with test button and export features", 
+        "Improved date/time handling with proper timezone support",
+        "Added concept owner information (Harshal Tankaria)",
+        "Enhanced export functionality for reports and analysis",
+        "Added real-time day trading signals and alerts"
+    ],
     "V0.1.1": [
         "Added SENSEX stocks to Indian market analysis (35 total stocks)",
         "Fixed Python 3.13 email import compatibility",
@@ -41,6 +59,27 @@ VERSION_NOTES = {
         "Portfolio optimization algorithms"
     ]
 }
+
+# Timezone setup for proper date/time handling
+EST = pytz.timezone('US/Eastern')
+UTC = pytz.timezone('UTC')
+
+def get_current_time(timezone_str='US/Eastern'):
+    """Get current time with proper timezone handling"""
+    tz = pytz.timezone(timezone_str)
+    return datetime.now(tz)
+
+def format_datetime(dt, format_str='%Y-%m-%d %H:%M:%S %Z'):
+    """Format datetime with timezone information"""
+    return dt.strftime(format_str)
+
+# Day Trading Configuration
+DAY_TRADING_STOCKS = ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'NVDA']
+TRADING_HOURS = {
+    'market_open': 9.5,  # 9:30 AM
+    'market_close': 16.0,  # 4:00 PM
+}
+
 import requests
 from bs4 import BeautifulSoup
 import json
@@ -469,7 +508,7 @@ class EnhancedStockAnalyzer:
                 'ml_prediction': ml_prediction,
                 'criteria': criteria,
                 'investment_recommendation': investment_recommendation,
-                'analysis_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                'analysis_date': format_datetime(get_current_time())
             }
             
             analyses.append(analysis)
@@ -507,19 +546,227 @@ class EnhancedStockAnalyzer:
             'expected_return': fundamentals.get('target_price', current_price) - current_price
         }
 
+class DayTradingAnalyzer:
+    def __init__(self):
+        self.stocks = DAY_TRADING_STOCKS
+        self.signals = {}
+        
+    def get_intraday_data(self, symbol: str, period: str = '1d', interval: str = '5m') -> pd.DataFrame:
+        """Get intraday data for day trading analysis"""
+        try:
+            stock = yf.Ticker(symbol)
+            data = stock.history(period=period, interval=interval)
+            return data
+        except Exception as e:
+            st.error(f"Error fetching intraday data for {symbol}: {e}")
+            return pd.DataFrame()
+    
+    def calculate_day_trading_signals(self, symbol: str) -> Dict:
+        """Calculate buy/sell signals for day trading"""
+        data = self.get_intraday_data(symbol)
+        if data.empty:
+            return {}
+            
+        # Calculate technical indicators
+        data['SMA_20'] = data['Close'].rolling(window=20).mean()
+        data['SMA_50'] = data['Close'].rolling(window=50).mean()
+        data['RSI'] = self.calculate_rsi(data['Close'])
+        data['MACD'], data['MACD_signal'] = self.calculate_macd(data['Close'])
+        data['Volume_SMA'] = data['Volume'].rolling(window=20).mean()
+        
+        current = data.iloc[-1]
+        prev = data.iloc[-2] if len(data) > 1 else current
+        
+        # Generate signals
+        signals = {
+            'symbol': symbol,
+            'current_price': current['Close'],
+            'timestamp': get_current_time(),
+            'volume': current['Volume'],
+            'signals': []
+        }
+        
+        # Buy signals
+        if (current['Close'] > current['SMA_20'] and 
+            prev['Close'] <= prev['SMA_20'] and 
+            current['RSI'] < 70):
+            signals['signals'].append({
+                'type': 'BUY',
+                'reason': 'Price crossed above SMA 20',
+                'strength': 'STRONG' if current['Volume'] > current['Volume_SMA'] * 1.5 else 'MODERATE',
+                'entry_price': current['Close'],
+                'stop_loss': current['Close'] * 0.98,
+                'target': current['Close'] * 1.03
+            })
+            
+        if (current['MACD'] > current['MACD_signal'] and 
+            prev['MACD'] <= prev['MACD_signal'] and 
+            current['RSI'] < 80):
+            signals['signals'].append({
+                'type': 'BUY',
+                'reason': 'MACD bullish crossover',
+                'strength': 'MODERATE',
+                'entry_price': current['Close'],
+                'stop_loss': current['Close'] * 0.97,
+                'target': current['Close'] * 1.04
+            })
+        
+        # Sell signals
+        if (current['Close'] < current['SMA_20'] and 
+            prev['Close'] >= prev['SMA_20'] and 
+            current['RSI'] > 30):
+            signals['signals'].append({
+                'type': 'SELL',
+                'reason': 'Price dropped below SMA 20',
+                'strength': 'STRONG' if current['Volume'] > current['Volume_SMA'] * 1.5 else 'MODERATE',
+                'entry_price': current['Close'],
+                'stop_loss': current['Close'] * 1.02,
+                'target': current['Close'] * 0.97
+            })
+            
+        if (current['MACD'] < current['MACD_signal'] and 
+            prev['MACD'] >= prev['MACD_signal'] and 
+            current['RSI'] > 20):
+            signals['signals'].append({
+                'type': 'SELL',
+                'reason': 'MACD bearish crossover',
+                'strength': 'MODERATE',
+                'entry_price': current['Close'],
+                'stop_loss': current['Close'] * 1.03,
+                'target': current['Close'] * 0.96
+            })
+        
+        return signals
+    
+    def calculate_rsi(self, prices: pd.Series, window: int = 14) -> pd.Series:
+        """Calculate RSI indicator"""
+        delta = prices.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
+    def calculate_macd(self, prices: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+        """Calculate MACD indicator"""
+        exp1 = prices.ewm(span=fast).mean()
+        exp2 = prices.ewm(span=slow).mean()
+        macd = exp1 - exp2
+        macd_signal = macd.ewm(span=signal).mean()
+        return macd, macd_signal
+    
+    def get_all_day_trading_signals(self) -> List[Dict]:
+        """Get day trading signals for all tracked stocks"""
+        all_signals = []
+        
+        for symbol in self.stocks:
+            signals = self.calculate_day_trading_signals(symbol)
+            if signals:
+                all_signals.append(signals)
+        
+        return all_signals
+
+class ExportManager:
+    def __init__(self):
+        pass
+    
+    def export_analysis_to_csv(self, analyses: List[Dict]) -> str:
+        """Export analysis results to CSV format"""
+        export_data = []
+        
+        for analysis in analyses:
+            fund = analysis['fundamentals']
+            inv_rec = analysis['investment_recommendation']
+            
+            export_data.append({
+                'Symbol': analysis['symbol'],
+                'Company': fund.get('company_name', 'N/A'),
+                'Current_Price': fund.get('current_price', 0),
+                'Score': analysis['score'],
+                'ML_Prediction': analysis['ml_prediction'],
+                'PE_Ratio': fund.get('pe_ratio', 0),
+                'ROE': fund.get('roe', 0) * 100,
+                'Revenue_Growth': fund.get('revenue_growth', 0) * 100,
+                'Debt_to_Equity': fund.get('debt_to_equity', 0),
+                'Recommended_Shares': inv_rec['shares'],
+                'Investment_Amount': inv_rec['amount'],
+                'Portfolio_Percentage': inv_rec['percentage'],
+                'Analysis_Date': analysis['analysis_date']
+            })
+        
+        df = pd.DataFrame(export_data)
+        return df.to_csv(index=False)
+    
+    def export_day_trading_signals_to_csv(self, signals: List[Dict]) -> str:
+        """Export day trading signals to CSV format"""
+        export_data = []
+        
+        for signal_data in signals:
+            for signal in signal_data['signals']:
+                export_data.append({
+                    'Symbol': signal_data['symbol'],
+                    'Current_Price': signal_data['current_price'],
+                    'Signal_Type': signal['type'],
+                    'Reason': signal['reason'],
+                    'Strength': signal['strength'],
+                    'Entry_Price': signal['entry_price'],
+                    'Stop_Loss': signal['stop_loss'],
+                    'Target': signal['target'],
+                    'Timestamp': format_datetime(signal_data['timestamp'])
+                })
+        
+        df = pd.DataFrame(export_data)
+        return df.to_csv(index=False)
+    
+    def create_download_link(self, data: str, filename: str, file_type: str = "csv") -> str:
+        """Create a download link for the exported data"""
+        b64 = base64.b64encode(data.encode()).decode()
+        href = f'<a href="data:file/{file_type};base64,{b64}" download="{filename}">Download {filename}</a>'
+        return href
+
 class EmailNotifier:
     def __init__(self):
         self.smtp_server = "smtp.gmail.com"
         self.smtp_port = 587
     
-    def send_daily_recommendations(self, user_email: str, recommendations: List[Dict], 
-                                 sender_email: str, sender_password: str):
-        """Send daily recommendations via email"""
+    def send_test_email(self, user_email: str, sender_email: str, sender_password: str):
+        """Send a test email to verify email configuration"""
         try:
-            # Create email content
-            subject = f"Daily Investment Recommendations - {datetime.now().strftime('%Y-%m-%d')}"
+            current_time = get_current_time()
+            subject = f"Test Email - {APP_NAME} - {format_datetime(current_time, '%Y-%m-%d %H:%M %Z')}"
             
-            html_content = self._create_email_html(recommendations)
+            html_content = f"""
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: Arial, sans-serif; }}
+                    .header {{ background-color: #28a745; color: white; padding: 20px; text-align: center; }}
+                    .content {{ padding: 20px; }}
+                    .footer {{ background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #666; }}
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>Email Test Successful! ✅</h1>
+                    <p>Your email configuration is working correctly</p>
+                </div>
+                
+                <div class="content">
+                    <h2>Test Details</h2>
+                    <p><strong>Application:</strong> {APP_NAME} v{APP_VERSION}</p>
+                    <p><strong>Concept Owner:</strong> {APP_CONCEPT_OWNER}</p>
+                    <p><strong>Test Time:</strong> {format_datetime(current_time)}</p>
+                    <p><strong>Recipient:</strong> {user_email}</p>
+                    
+                    <p>This test email confirms that your Gmail configuration is properly set up for receiving investment reports and day trading alerts.</p>
+                </div>
+                
+                <div class="footer">
+                    <p>Powered by {APP_NAME} | Developed by {APP_CONCEPT_OWNER}</p>
+                </div>
+            </body>
+            </html>
+            """
             
             # Create message
             msg = MimeMultipart('alternative')
@@ -541,11 +788,87 @@ class EmailNotifier:
             return True
             
         except Exception as e:
+            st.error(f"Test email failed: {e}")
+            return False
+
+    def send_daily_recommendations(self, user_email: str, recommendations: List[Dict], 
+                                 sender_email: str, sender_password: str, export_data: str = None):
+        """Send daily recommendations via email with optional CSV attachment"""
+        try:
+            current_time = get_current_time()
+            subject = f"Daily Investment Recommendations - {format_datetime(current_time, '%Y-%m-%d')}"
+            
+            html_content = self._create_email_html(recommendations)
+            
+            # Create message
+            msg = MimeMultipart('mixed')
+            msg['Subject'] = subject
+            msg['From'] = sender_email
+            msg['To'] = user_email
+            
+            # Attach HTML content
+            html_part = MimeText(html_content, 'html')
+            msg.attach(html_part)
+            
+            # Attach CSV if provided
+            if export_data:
+                csv_attachment = MIMEBase('application', 'octet-stream')
+                csv_attachment.set_payload(export_data.encode())
+                encoders.encode_base64(csv_attachment)
+                csv_attachment.add_header(
+                    'Content-Disposition',
+                    f'attachment; filename="investment_analysis_{format_datetime(current_time, "%Y%m%d_%H%M")}.csv"'
+                )
+                msg.attach(csv_attachment)
+            
+            # Send email
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+            server.quit()
+            
+            return True
+            
+        except Exception as e:
             st.error(f"Failed to send email: {e}")
+            return False
+    
+    def send_day_trading_alerts(self, user_email: str, signals: List[Dict], 
+                              sender_email: str, sender_password: str):
+        """Send day trading alerts via email"""
+        try:
+            current_time = get_current_time()
+            subject = f"Day Trading Alerts - {format_datetime(current_time, '%Y-%m-%d %H:%M %Z')}"
+            
+            html_content = self._create_day_trading_email_html(signals)
+            
+            # Create message
+            msg = MimeMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = sender_email
+            msg['To'] = user_email
+            
+            # Attach HTML content
+            html_part = MimeText(html_content, 'html')
+            msg.attach(html_part)
+            
+            # Send email
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+            server.quit()
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Failed to send day trading alerts: {e}")
             return False
     
     def _create_email_html(self, recommendations: List[Dict]) -> str:
         """Create HTML email content"""
+        current_time = get_current_time()
         html = f"""
         <html>
         <head>
@@ -563,8 +886,9 @@ class EmailNotifier:
         <body>
             <div class="header">
                 <h1>Your Daily Investment Recommendations</h1>
-                <p>Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p>Generated on {format_datetime(current_time)}</p>
                 <p style="font-size: 14px; opacity: 0.9;">{APP_NAME} v{APP_VERSION}</p>
+                <p style="font-size: 12px; opacity: 0.8;">Concept & Owner: {APP_CONCEPT_OWNER}</p>
             </div>
             
             <div style="padding: 20px;">
@@ -595,7 +919,82 @@ class EmailNotifier:
                 Please conduct your own research before making investment decisions.</p>
                 <hr style="margin: 10px 0; border: none; border-top: 1px solid #ddd;">
                 <p><strong>{APP_NAME}</strong> v{APP_VERSION} | Build Date: {APP_BUILD_DATE}</p>
+                <p>Concept & Owner: <strong>{APP_CONCEPT_OWNER}</strong></p>
                 <p>AI-Powered Investment Analysis | Machine Learning Enhanced Predictions</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return html
+    
+    def _create_day_trading_email_html(self, signals: List[Dict]) -> str:
+        """Create HTML email content for day trading alerts"""
+        current_time = get_current_time()
+        html = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; }}
+                .header {{ background-color: #FF6B35; color: white; padding: 20px; text-align: center; }}
+                .signal {{ border: 1px solid #ddd; margin: 10px; padding: 15px; border-radius: 5px; }}
+                .buy-signal {{ border-left: 5px solid #28a745; background-color: #f8fff8; }}
+                .sell-signal {{ border-left: 5px solid #dc3545; background-color: #fff8f8; }}
+                .strong {{ font-weight: bold; color: #212529; }}
+                .moderate {{ font-weight: normal; color: #6c757d; }}
+                .metric {{ display: inline-block; margin: 5px 10px; }}
+                .footer {{ background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #666; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>🚨 Day Trading Alerts 🚨</h1>
+                <p>Generated on {format_datetime(current_time)}</p>
+                <p style="font-size: 14px; opacity: 0.9;">{APP_NAME} v{APP_VERSION}</p>
+                <p style="font-size: 12px; opacity: 0.8;">Concept & Owner: {APP_CONCEPT_OWNER}</p>
+            </div>
+            
+            <div style="padding: 20px;">
+                <h2>Active Trading Signals</h2>
+        """
+        
+        signal_count = 0
+        for stock_signals in signals:
+            for signal in stock_signals['signals']:
+                signal_count += 1
+                signal_class = 'buy-signal' if signal['type'] == 'BUY' else 'sell-signal'
+                strength_class = 'strong' if signal['strength'] == 'STRONG' else 'moderate'
+                
+                html += f"""
+                    <div class="signal {signal_class}">
+                        <h3>{'🟢' if signal['type'] == 'BUY' else '🔴'} {signal['type']} - {stock_signals['symbol']}</h3>
+                        <p class="{strength_class}"><strong>Strength:</strong> {signal['strength']}</p>
+                        <p><strong>Reason:</strong> {signal['reason']}</p>
+                        <p><strong>Current Price:</strong> ${stock_signals['current_price']:.2f}</p>
+                        <div class="metric"><strong>Entry:</strong> ${signal['entry_price']:.2f}</div>
+                        <div class="metric"><strong>Stop Loss:</strong> ${signal['stop_loss']:.2f}</div>
+                        <div class="metric"><strong>Target:</strong> ${signal['target']:.2f}</div>
+                        <p><strong>Risk/Reward:</strong> {abs((signal['target'] - signal['entry_price']) / (signal['stop_loss'] - signal['entry_price'])):.2f}:1</p>
+                    </div>
+                """
+        
+        if signal_count == 0:
+            html += """
+                <div style="text-align: center; padding: 40px; color: #6c757d;">
+                    <h3>No Active Signals</h3>
+                    <p>Currently monitoring markets. Signals will appear when trading opportunities arise.</p>
+                </div>
+            """
+        
+        html += f"""
+            </div>
+            <div class="footer">
+                <p><strong>⚠️ Risk Warning:</strong> Day trading involves significant risk. These are algorithmic signals for educational purposes only.<br>
+                Always use proper risk management and never risk more than you can afford to lose.</p>
+                <hr style="margin: 10px 0; border: none; border-top: 1px solid #ddd;">
+                <p><strong>{APP_NAME}</strong> v{APP_VERSION} | Build Date: {APP_BUILD_DATE}</p>
+                <p>Concept & Owner: <strong>{APP_CONCEPT_OWNER}</strong></p>
+                <p>Real-time Day Trading Analysis | Technical Indicators & Signals</p>
             </div>
         </body>
         </html>
@@ -614,6 +1013,8 @@ def main():
     db = DatabaseManager()
     analyzer = EnhancedStockAnalyzer()
     emailer = EmailNotifier()
+    day_trader = DayTradingAnalyzer()
+    exporter = ExportManager()
     
     # Sidebar for user input
     st.sidebar.title("🚀 Investment Preferences")
@@ -679,12 +1080,23 @@ def main():
         sender_email = st.sidebar.text_input("Your Gmail Address", type="default")
         sender_password = st.sidebar.text_input("Gmail App Password", type="password", 
                                                help="Use Gmail App Password, not regular password")
+        
+        # Test email button
+        if sender_email and sender_password and user_email:
+            if st.sidebar.button("🧪 Test Email Configuration"):
+                with st.spinner("Testing email configuration..."):
+                    success = emailer.send_test_email(user_email, sender_email, sender_password)
+                    if success:
+                        st.sidebar.success("✅ Test email sent successfully!")
+                    else:
+                        st.sidebar.error("❌ Test email failed. Check your credentials.")
     
     # Main interface
     st.title(f"🤖 {APP_NAME}")
     col1, col2 = st.columns([3, 1])
     with col1:
         st.markdown("### Intelligent Investment Recommendations with Machine Learning")
+        st.markdown(f"**Concept & Owner:** {APP_CONCEPT_OWNER}")
     with col2:
         st.markdown(f"**Version {APP_VERSION}** | {APP_BUILD_DATE}")
     
@@ -698,7 +1110,7 @@ def main():
     """, unsafe_allow_html=True)
     
     # Create tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Analysis", "📈 Portfolio", "🤖 ML Insights", "⚙️ Settings", "ℹ️ About"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Analysis", "📈 Portfolio", "🚨 Day Trading", "🤖 ML Insights", "⚙️ Settings", "ℹ️ About"])
     
     with tab1:
         st.subheader(f"Stock Analysis for {country}")
@@ -753,17 +1165,39 @@ def main():
                                 st.metric("Investment Amount", f"${inv_rec['amount']:.2f}")
                                 st.metric("Portfolio %", f"{inv_rec['percentage']:.1f}%")
                     
-                    # Send email notification if configured
-                    if notification_frequency != "None" and sender_email and sender_password:
-                        if st.button("📧 Send Email Report"):
-                            with st.spinner("Sending email..."):
-                                success = emailer.send_daily_recommendations(
-                                    user_email, analyses, sender_email, sender_password
-                                )
-                                if success:
-                                    st.success("Email sent successfully!")
-                                else:
-                                    st.error("Failed to send email. Check your credentials.")
+                    # Export and email functionality
+                    st.subheader("📤 Export & Share")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        if st.button("📥 Export to CSV"):
+                            csv_data = exporter.export_analysis_to_csv(analyses)
+                            current_time = get_current_time()
+                            filename = f"investment_analysis_{format_datetime(current_time, '%Y%m%d_%H%M')}.csv"
+                            st.download_button(
+                                label="Download CSV",
+                                data=csv_data,
+                                file_name=filename,
+                                mime="text/csv"
+                            )
+                    
+                    with col2:
+                        # Send email notification if configured
+                        if notification_frequency != "None" and sender_email and sender_password:
+                            if st.button("📧 Send Email Report"):
+                                with st.spinner("Sending email..."):
+                                    csv_data = exporter.export_analysis_to_csv(analyses)
+                                    success = emailer.send_daily_recommendations(
+                                        user_email, analyses, sender_email, sender_password, csv_data
+                                    )
+                                    if success:
+                                        st.success("Email sent successfully with CSV attachment!")
+                                    else:
+                                        st.error("Failed to send email. Check your credentials.")
+                    
+                    with col3:
+                        if st.button("📊 Generate Summary Report"):
+                            st.info("Summary report feature coming soon!")
                 else:
                     st.error("No data available for analysis.")
     
@@ -804,6 +1238,106 @@ def main():
             st.info("Run analysis first to see portfolio recommendations.")
     
     with tab3:
+        st.subheader("🚨 Day Trading Mode")
+        
+        # Day trading header
+        current_time = get_current_time()
+        market_status = "🟢 OPEN" if 9.5 <= current_time.hour + current_time.minute/60 <= 16.0 else "🔴 CLOSED"
+        
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            st.markdown(f"**Market Status:** {market_status}")
+            st.markdown(f"**Current Time:** {format_datetime(current_time, '%H:%M:%S %Z')}")
+        with col2:
+            auto_refresh = st.checkbox("Auto Refresh (30s)", value=False)
+        with col3:
+            refresh_signals = st.button("🔄 Refresh Signals")
+        
+        # Get day trading signals
+        if auto_refresh or refresh_signals or 'day_trading_signals' not in st.session_state:
+            with st.spinner("Analyzing day trading opportunities..."):
+                day_trading_signals = day_trader.get_all_day_trading_signals()
+                st.session_state.day_trading_signals = day_trading_signals
+        else:
+            day_trading_signals = st.session_state.get('day_trading_signals', [])
+        
+        if day_trading_signals:
+            # Summary metrics
+            total_signals = sum(len(stock['signals']) for stock in day_trading_signals)
+            buy_signals = sum(len([s for s in stock['signals'] if s['type'] == 'BUY']) for stock in day_trading_signals)
+            sell_signals = total_signals - buy_signals
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Signals", total_signals)
+            with col2:
+                st.metric("Buy Signals", buy_signals, delta=f"+{buy_signals}")
+            with col3:
+                st.metric("Sell Signals", sell_signals, delta=f"-{sell_signals}")
+            with col4:
+                st.metric("Stocks Monitored", len(DAY_TRADING_STOCKS))
+            
+            # Display signals by stock
+            for stock_data in day_trading_signals:
+                if stock_data['signals']:
+                    with st.expander(f"📈 {stock_data['symbol']} - ${stock_data['current_price']:.2f} ({len(stock_data['signals'])} signals)"):
+                        for i, signal in enumerate(stock_data['signals']):
+                            signal_color = "🟢" if signal['type'] == 'BUY' else "🔴"
+                            strength_badge = "🔥" if signal['strength'] == 'STRONG' else "📍"
+                            
+                            st.markdown(f"""
+                            ### {signal_color} {signal['type']} Signal {strength_badge}
+                            **Strength:** {signal['strength']}  
+                            **Reason:** {signal['reason']}  
+                            **Entry Price:** ${signal['entry_price']:.2f}  
+                            **Stop Loss:** ${signal['stop_loss']:.2f}  
+                            **Target:** ${signal['target']:.2f}  
+                            **Risk/Reward:** {abs((signal['target'] - signal['entry_price']) / (signal['stop_loss'] - signal['entry_price'])):.2f}:1
+                            """)
+            
+            # Export day trading signals
+            st.subheader("📤 Export Day Trading Signals")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("📥 Export Signals to CSV"):
+                    csv_data = exporter.export_day_trading_signals_to_csv(day_trading_signals)
+                    current_time = get_current_time()
+                    filename = f"day_trading_signals_{format_datetime(current_time, '%Y%m%d_%H%M')}.csv"
+                    st.download_button(
+                        label="Download Signals CSV",
+                        data=csv_data,
+                        file_name=filename,
+                        mime="text/csv"
+                    )
+            
+            with col2:
+                # Send day trading alerts if configured
+                if notification_frequency != "None" and sender_email and sender_password:
+                    if st.button("📧 Send Day Trading Alerts"):
+                        with st.spinner("Sending trading alerts..."):
+                            success = emailer.send_day_trading_alerts(
+                                user_email, day_trading_signals, sender_email, sender_password
+                            )
+                            if success:
+                                st.success("Day trading alerts sent successfully!")
+                            else:
+                                st.error("Failed to send alerts. Check your credentials.")
+        else:
+            st.info("No day trading signals available at the moment. The algorithm monitors the market during trading hours.")
+            
+        # Trading disclaimer
+        st.warning("""
+        **⚠️ Day Trading Risk Warning:**  
+        Day trading involves significant financial risk and is not suitable for all investors. These signals are for educational purposes only and should not be considered as financial advice. Always conduct your own research and consider consulting with a licensed financial advisor. Never risk more than you can afford to lose.
+        """)
+        
+        # Auto refresh mechanism
+        if auto_refresh:
+            time.sleep(30)
+            st.rerun()
+
+    with tab4:
         st.subheader("🤖 Machine Learning Insights")
         
         if 'analyses' in locals() and analyses:
@@ -846,7 +1380,7 @@ def main():
         else:
             st.info("Run analysis first to see ML insights.")
     
-    with tab4:
+    with tab5:
         st.subheader("⚙️ Application Settings")
         
         st.markdown("### 📧 Email Notification Setup")
@@ -873,7 +1407,18 @@ def main():
         - **India**: NIFTY 50 + SENSEX stocks (35 total)
         """)
     
-    with tab5:
+        st.markdown("### 🚨 Day Trading Features")
+        st.markdown("""
+        **New Day Trading Mode includes:**
+        - Real-time technical analysis for top 5 stocks (AAPL, MSFT, GOOGL, TSLA, NVDA)
+        - Buy/sell signals based on SMA, RSI, and MACD indicators
+        - Risk/reward ratio calculations
+        - Email alerts for trading opportunities
+        - CSV export for trading signals
+        - Market status and timing information
+        """)
+    
+    with tab6:
         st.subheader(f"ℹ️ About {APP_NAME}")
         
         # Version Information
@@ -943,17 +1488,40 @@ def main():
         
         # Credits
         st.markdown("---")
-        st.subheader("👨‍💻 Credits")
+        st.subheader("👨‍💻 Credits & Ownership")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"""
+            **Concept & Owner:** {APP_CONCEPT_OWNER}  
+            **Application:** {APP_NAME}  
+            **Version:** {APP_VERSION}  
+            **Build Date:** {APP_BUILD_DATE}
+            """)
+        
+        with col2:
+            st.markdown("""
+            **Technical Stack:**
+            - **ML Models**: Scikit-learn, Pandas, NumPy
+            - **Data Provider**: Yahoo Finance  
+            - **UI Framework**: Streamlit
+            - **Visualization**: Plotly
+            - **Email**: SMTP Integration
+            """)
+            
+        st.markdown("---")
+        st.markdown("### 🚀 New Features in v2.0.0")
         st.markdown("""
-        - **Developer**: AI-Powered Stock Analysis System
-        - **ML Models**: Scikit-learn, Pandas, NumPy
-        - **Data Provider**: Yahoo Finance
-        - **UI Framework**: Streamlit
-        - **Visualization**: Plotly
+        ✅ **Day Trading Mode** - Real-time signals for top 5 stocks  
+        ✅ **Enhanced Email System** - Test button & CSV attachments  
+        ✅ **Export Functionality** - Download analysis as CSV  
+        ✅ **Improved DateTime** - Proper timezone handling  
+        ✅ **Better UI** - Enhanced user experience  
+        ✅ **Owner Attribution** - Clear ownership and concept credits
         """)
         
         st.markdown("---")
-        st.markdown(f"<center><i>© 2024 {APP_NAME} | All Rights Reserved</i></center>", 
+        st.markdown(f"<center><i>© 2024 {APP_NAME} | Developed by {APP_CONCEPT_OWNER} | All Rights Reserved</i></center>", 
                    unsafe_allow_html=True)
 
 if __name__ == "__main__":
