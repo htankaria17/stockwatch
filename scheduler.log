@@ -1,0 +1,2 @@
+2025-07-15 16:31:46,781 - WARNING - Email credentials not found in environment variables.
+2025-07-15 16:31:46,781 - WARNING - Set SENDER_EMAIL and SENDER_PASSWORD environment variables.
