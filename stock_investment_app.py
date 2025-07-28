@@ -176,12 +176,12 @@ class DatabaseManager:
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (user.name, user.email, user.country, user.investment_amount, 
               user.desired_return, user.risk_tolerance, user.notification_frequency))
-        
-        user_id = cursor.lastrowid
-        conn.commit()
+              conn.commit()
+        cursor.execute('SELECT id FROM users WHERE email = ?', (user.email,))
+        result = cursor.fetchone()
+        user_id = result[0] if result else None
         conn.close()
-        return user_id
-    
+                         return user_id
     def get_user_by_email(self, email: str) -> Optional[UserProfile]:
         """Get user by email"""
         conn = sqlite3.connect(self.db_name)
