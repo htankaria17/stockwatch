@@ -99,7 +99,7 @@ class DailyScheduler:
                     self.logger.warning(f"No analysis data available for {user.email}")
                 
                 # Add delay between users to avoid rate limiting
-                time.sleep(30)
+             time.sleep(5)
                 
             except Exception as e:
                 self.logger.error(f"Error processing user {user.email}: {e}")
@@ -110,8 +110,8 @@ class DailyScheduler:
     def _log_email_sent(self, user_email: str, subject: str, status: str):
         """Log email sending status to database"""
         conn = sqlite3.connect(self.db.db_name)
-        cursor = conn.cursor()
-        
+      cursor = conn.cursor()
+5
         # Get user ID
         cursor.execute('SELECT id FROM users WHERE email = ?', (user_email,))
         user_row = cursor.fetchone()
@@ -131,20 +131,24 @@ class DailyScheduler:
         self.logger.info("Starting weekly recommendation process...")
         # Similar to daily but for weekly users
         # Implementation can be added here
-        pass
+                self.logger.info("Weekly recommendations not implemented; skipping.")
     
     def send_monthly_recommendations(self):
         """Send monthly recommendations (runs on 1st of month)"""
         self.logger.info("Starting monthly recommendation process...")
-        # Similar to daily but for monthly users
+        # Only run on the first day of the month
+        if datetime.now().day != 1:
+            self.logger.info("Not the first day of the month, skipping monthly notifications.")
+            return
+        self.logger.info("Monthly recommendations not implemented; skipping.")# Similar to daily but for monthly users
         # Implementation can be added here
-        pass
+       
     
     def cleanup_old_data(self):
         """Clean up old analysis data (keep last 30 days)"""
         self.logger.info("Cleaning up old data...")
         
-        conn = sqlite3.connect(self.db.db_name)
+conn = sqlite3.connect(self.db.db_name)
         cursor = conn.cursor()
         
         # Delete analysis older than 30 days
@@ -155,7 +159,7 @@ class DailyScheduler:
         ''', (cutoff_date.date(),))
         
         # Delete email logs older than 90 days
-        cutoff_date_logs = datetime.now() - timedelta(days=90)
+        cutoff_date_logs = (datetime.now() - timedelta(days=90)).date())
         cursor.execute('''
             DELETE FROM email_log 
             WHERE sent_at < ?
@@ -180,9 +184,8 @@ def main():
     # Schedule weekly recommendations on Sunday at 9:00 AM
     schedule.every().sunday.at("09:00").do(scheduler.send_weekly_recommendations)
     
-    # Schedule monthly recommendations on 1st day at 10:00 AM
-    schedule.every().month.do(scheduler.send_monthly_recommendations)
-    
+    # Schedule monthly recommendations( runs daily at 10:00 AM, but only sends on the 1st day of the month)
+  schedule.every().day.at("10:00").do(scheduler.send_monthly_recommendations)
     # Schedule cleanup every week on Monday at 2:00 AM
     schedule.every().monday.at("02:00").do(scheduler.cleanup_old_data)
     
