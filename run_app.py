@@ -11,7 +11,7 @@ import os
 def install_requirements():
     """Install required dependencies"""
     print("Installing required dependencies...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--break-system-packages", "-r", "requirements_gui.txt"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements_gui.txt"])
 
 def run_streamlit_app():
     """Run the Streamlit application"""
