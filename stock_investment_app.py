@@ -10,6 +10,9 @@ import sqlite3
 import smtplib
 import io
 import base64
+import hashlib
+import requests
+import time
 
 # Email imports with fallback
 try:
@@ -32,17 +35,18 @@ except ImportError:
 
 # Application Version Information
 APP_VERSION = "V0.2.0"
-APP_BUILD_DATE = "2024-12-21"
+APP_BUILD_DATE = "2024-12-28"
 APP_NAME = "AI-Powered Stock Investment Analyzer"
 APP_CONCEPT_OWNER = "Harshal Tankaria"
 VERSION_NOTES = {
     "V0.2.0": [
-        "Added Day Trading Mode with buy/sell triggers for top 5 stocks",
-        "Fixed email functionality with test button and export features", 
-        "Improved date/time handling with proper timezone support",
-        "Added concept owner information (Harshal Tankaria)",
-        "Enhanced export functionality for reports and analysis",
-        "Added real-time day trading signals and alerts"
+        "Fixed email functionality with enhanced test button and export features", 
+        "Added proper user login system with secure authentication",
+        "Fixed date and time handling with internet synchronization",
+        "Added enhanced buy/sell triggers for top 5 trading stocks",
+        "Improved export functionality for reports and analysis",
+        "Added concept owner attribution (Harshal Tankaria)",
+        "Enhanced day trading signals with real-time alerts"
     ],
     "V0.1.1": [
         "Added SENSEX stocks to Indian market analysis (35 total stocks)",
@@ -60,30 +64,46 @@ VERSION_NOTES = {
     ]
 }
 
-# Timezone setup for proper date/time handling
-EST = pytz.timezone('US/Eastern')
-UTC = pytz.timezone('UTC')
+# Enhanced timezone and time handling
+def get_internet_time():
+    """Get accurate current time from internet"""
+    try:
+        # Use WorldTimeAPI for accurate time
+        response = requests.get('http://worldtimeapi.org/api/timezone/UTC', timeout=5)
+        if response.status_code == 200:
+            time_data = response.json()
+            utc_time = datetime.fromisoformat(time_data['datetime'].replace('Z', '+00:00'))
+            return utc_time
+        else:
+            # Fallback to system time
+            return datetime.now(pytz.UTC)
+    except:
+        # Fallback to system time if internet fails
+        return datetime.now(pytz.UTC)
 
 def get_current_time(timezone_str='US/Eastern'):
-    """Get current time with proper timezone handling"""
-    tz = pytz.timezone(timezone_str)
-    return datetime.now(tz)
+    """Get current time with proper timezone handling using internet time"""
+    try:
+        utc_time = get_internet_time()
+        tz = pytz.timezone(timezone_str)
+        return utc_time.astimezone(tz)
+    except:
+        # Fallback to system time
+        tz = pytz.timezone(timezone_str)
+        return datetime.now(tz)
 
 def format_datetime(dt, format_str='%Y-%m-%d %H:%M:%S %Z'):
     """Format datetime with timezone information"""
     return dt.strftime(format_str)
 
-# Day Trading Configuration
+# Enhanced Day Trading Configuration with better signals
 DAY_TRADING_STOCKS = ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'NVDA']
 TRADING_HOURS = {
     'market_open': 9.5,  # 9:30 AM
     'market_close': 16.0,  # 4:00 PM
 }
 
-import requests
-from bs4 import BeautifulSoup
-import json
-import time
+# Missing imports for complete functionality
 import warnings
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.preprocessing import StandardScaler
@@ -95,7 +115,6 @@ import threading
 from typing import Dict, List, Tuple, Optional
 import os
 from dataclasses import dataclass
-import hashlib
 
 warnings.filterwarnings('ignore')
 
@@ -108,6 +127,175 @@ class UserProfile:
     desired_return: float
     risk_tolerance: str
     notification_frequency: str
+
+# User Authentication System
+class UserAuth:
+    def __init__(self, db_name="investment_app.db"):
+        self.db_name = db_name
+        self.init_auth_tables()
+    
+    def init_auth_tables(self):
+        """Initialize authentication tables"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        # User authentication table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_auth (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP,
+                is_active BOOLEAN DEFAULT 1
+            )
+        ''')
+        
+        # User sessions table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                session_token TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                is_active BOOLEAN DEFAULT 1,
+                FOREIGN KEY (user_id) REFERENCES user_auth (id)
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+    
+    def hash_password(self, password: str) -> tuple:
+        """Hash password with salt"""
+        salt = hashlib.sha256(str(time.time()).encode()).hexdigest()[:16]
+        password_hash = hashlib.sha256((password + salt).encode()).hexdigest()
+        return password_hash, salt
+    
+    def verify_password(self, password: str, stored_hash: str, salt: str) -> bool:
+        """Verify password against stored hash"""
+        return hashlib.sha256((password + salt).encode()).hexdigest() == stored_hash
+    
+    def register_user(self, username: str, email: str, password: str) -> tuple:
+        """Register new user"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        try:
+            # Check if user exists
+            cursor.execute('SELECT id FROM user_auth WHERE username = ? OR email = ?', (username, email))
+            if cursor.fetchone():
+                return False, "Username or email already exists"
+            
+            # Hash password
+            password_hash, salt = self.hash_password(password)
+            
+            # Insert user
+            cursor.execute('''
+                INSERT INTO user_auth (username, email, password_hash, salt)
+                VALUES (?, ?, ?, ?)
+            ''', (username, email, password_hash, salt))
+            
+            conn.commit()
+            return True, "User registered successfully"
+        
+        except Exception as e:
+            return False, f"Registration failed: {e}"
+        finally:
+            conn.close()
+    
+    def login_user(self, username: str, password: str) -> tuple:
+        """Login user and create session"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        try:
+            # Get user data
+            cursor.execute('''
+                SELECT id, password_hash, salt, email FROM user_auth 
+                WHERE username = ? AND is_active = 1
+            ''', (username,))
+            
+            user_data = cursor.fetchone()
+            if not user_data:
+                return False, "Invalid username or password", None
+            
+            user_id, stored_hash, salt, email = user_data
+            
+            # Verify password
+            if not self.verify_password(password, stored_hash, salt):
+                return False, "Invalid username or password", None
+            
+            # Create session token
+            session_token = hashlib.sha256(f"{user_id}{time.time()}".encode()).hexdigest()
+            expires_at = datetime.now() + timedelta(hours=24)  # Session expires in 24 hours
+            
+            # Store session
+            cursor.execute('''
+                INSERT INTO user_sessions (user_id, session_token, expires_at)
+                VALUES (?, ?, ?)
+            ''', (user_id, session_token, expires_at))
+            
+            # Update last login
+            cursor.execute('''
+                UPDATE user_auth SET last_login = CURRENT_TIMESTAMP WHERE id = ?
+            ''', (user_id,))
+            
+            conn.commit()
+            
+            return True, "Login successful", {
+                'user_id': user_id,
+                'username': username,
+                'email': email,
+                'session_token': session_token
+            }
+        
+        except Exception as e:
+            return False, f"Login failed: {e}", None
+        finally:
+            conn.close()
+    
+    def verify_session(self, session_token: str) -> tuple:
+        """Verify user session"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                SELECT s.user_id, u.username, u.email FROM user_sessions s
+                JOIN user_auth u ON s.user_id = u.id
+                WHERE s.session_token = ? AND s.is_active = 1 AND s.expires_at > CURRENT_TIMESTAMP
+            ''', (session_token,))
+            
+            result = cursor.fetchone()
+            if result:
+                return True, {
+                    'user_id': result[0],
+                    'username': result[1], 
+                    'email': result[2]
+                }
+            else:
+                return False, None
+        
+        except Exception as e:
+            return False, None
+        finally:
+            conn.close()
+    
+    def logout_user(self, session_token: str):
+        """Logout user by deactivating session"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE user_sessions SET is_active = 0 WHERE session_token = ?
+        ''', (session_token,))
+        
+        conn.commit()
+        conn.close()
 
 class DatabaseManager:
     def __init__(self, db_name="investment_app.db"):
@@ -551,8 +739,8 @@ class DayTradingAnalyzer:
         self.stocks = DAY_TRADING_STOCKS
         self.signals = {}
         
-    def get_intraday_data(self, symbol: str, period: str = '1d', interval: str = '5m') -> pd.DataFrame:
-        """Get intraday data for day trading analysis"""
+    def get_intraday_data(self, symbol: str, period: str = '2d', interval: str = '5m') -> pd.DataFrame:
+        """Get enhanced intraday data for day trading analysis"""
         try:
             stock = yf.Ticker(symbol)
             data = stock.history(period=period, interval=interval)
@@ -562,107 +750,234 @@ class DayTradingAnalyzer:
             return pd.DataFrame()
     
     def calculate_day_trading_signals(self, symbol: str) -> Dict:
-        """Calculate buy/sell signals for day trading"""
+        """Enhanced buy/sell signals calculation with multiple timeframes and indicators"""
         data = self.get_intraday_data(symbol)
-        if data.empty:
+        if data.empty or len(data) < 50:
             return {}
             
-        # Calculate technical indicators
+        # Calculate enhanced technical indicators
+        data['SMA_10'] = data['Close'].rolling(window=10).mean()
         data['SMA_20'] = data['Close'].rolling(window=20).mean()
         data['SMA_50'] = data['Close'].rolling(window=50).mean()
+        data['EMA_12'] = data['Close'].ewm(span=12).mean()
+        data['EMA_26'] = data['Close'].ewm(span=26).mean()
+        
+        # RSI (Relative Strength Index)
         data['RSI'] = self.calculate_rsi(data['Close'])
+        
+        # MACD indicators
         data['MACD'], data['MACD_signal'] = self.calculate_macd(data['Close'])
+        data['MACD_histogram'] = data['MACD'] - data['MACD_signal']
+        
+        # Bollinger Bands
+        data['BB_middle'] = data['Close'].rolling(window=20).mean()
+        bb_std = data['Close'].rolling(window=20).std()
+        data['BB_upper'] = data['BB_middle'] + (bb_std * 2)
+        data['BB_lower'] = data['BB_middle'] - (bb_std * 2)
+        
+        # Volume indicators
         data['Volume_SMA'] = data['Volume'].rolling(window=20).mean()
+        data['Volume_ratio'] = data['Volume'] / data['Volume_SMA']
+        
+        # Stochastic Oscillator
+        data['Stoch_K'], data['Stoch_D'] = self.calculate_stochastic(data)
+        
+        # Price momentum
+        data['Price_change'] = data['Close'].pct_change()
+        data['Price_momentum'] = data['Close'].rolling(window=10).apply(lambda x: (x.iloc[-1] / x.iloc[0]) - 1)
         
         current = data.iloc[-1]
         prev = data.iloc[-2] if len(data) > 1 else current
+        prev2 = data.iloc[-3] if len(data) > 2 else prev
         
-        # Generate signals
+        # Generate enhanced signals
         signals = {
             'symbol': symbol,
             'current_price': current['Close'],
             'timestamp': get_current_time(),
             'volume': current['Volume'],
+            'volume_ratio': current['Volume_ratio'],
+            'rsi': current['RSI'],
+            'macd': current['MACD'],
             'signals': []
         }
         
-        # Buy signals
-        if (current['Close'] > current['SMA_20'] and 
-            prev['Close'] <= prev['SMA_20'] and 
-            current['RSI'] < 70):
-            signals['signals'].append({
+        # Enhanced BUY signals with multiple confirmations
+        buy_signals = []
+        
+        # Signal 1: Golden Cross + Volume + RSI
+        if (current['SMA_10'] > current['SMA_20'] and 
+            prev['SMA_10'] <= prev['SMA_20'] and 
+            current['RSI'] > 30 and current['RSI'] < 70 and
+            current['Volume_ratio'] > 1.2):
+            buy_signals.append({
                 'type': 'BUY',
-                'reason': 'Price crossed above SMA 20',
-                'strength': 'STRONG' if current['Volume'] > current['Volume_SMA'] * 1.5 else 'MODERATE',
+                'reason': 'Golden Cross (SMA 10/20) with volume confirmation',
+                'strength': 'STRONG',
+                'confidence': 85,
+                'entry_price': current['Close'],
+                'stop_loss': current['Close'] * 0.985,
+                'target': current['Close'] * 1.025
+            })
+        
+        # Signal 2: MACD Bullish Crossover + RSI oversold recovery
+        if (current['MACD'] > current['MACD_signal'] and 
+            prev['MACD'] <= prev['MACD_signal'] and 
+            current['RSI'] > 35 and current['RSI'] < 65 and
+            current['MACD_histogram'] > prev['MACD_histogram']):
+            buy_signals.append({
+                'type': 'BUY',
+                'reason': 'MACD bullish crossover with RSI confirmation',
+                'strength': 'MODERATE',
+                'confidence': 75,
                 'entry_price': current['Close'],
                 'stop_loss': current['Close'] * 0.98,
                 'target': current['Close'] * 1.03
             })
-            
-        if (current['MACD'] > current['MACD_signal'] and 
-            prev['MACD'] <= prev['MACD_signal'] and 
-            current['RSI'] < 80):
-            signals['signals'].append({
+        
+        # Signal 3: Bollinger Band Bounce + Volume
+        if (current['Close'] > current['BB_lower'] and 
+            prev['Close'] <= prev['BB_lower'] and 
+            current['RSI'] < 40 and
+            current['Volume_ratio'] > 1.1):
+            buy_signals.append({
                 'type': 'BUY',
-                'reason': 'MACD bullish crossover',
+                'reason': 'Bollinger Band lower bounce with oversold RSI',
                 'strength': 'MODERATE',
+                'confidence': 70,
                 'entry_price': current['Close'],
-                'stop_loss': current['Close'] * 0.97,
-                'target': current['Close'] * 1.04
+                'stop_loss': current['BB_lower'] * 0.995,
+                'target': current['BB_middle']
             })
         
-        # Sell signals
-        if (current['Close'] < current['SMA_20'] and 
-            prev['Close'] >= prev['SMA_20'] and 
-            current['RSI'] > 30):
-            signals['signals'].append({
+        # Signal 4: Stochastic Oversold Recovery
+        if (current['Stoch_K'] > current['Stoch_D'] and 
+            prev['Stoch_K'] <= prev['Stoch_D'] and 
+            current['Stoch_K'] < 30 and current['RSI'] < 35):
+            buy_signals.append({
+                'type': 'BUY',
+                'reason': 'Stochastic oversold recovery',
+                'strength': 'WEAK',
+                'confidence': 60,
+                'entry_price': current['Close'],
+                'stop_loss': current['Close'] * 0.975,
+                'target': current['Close'] * 1.02
+            })
+        
+        # Enhanced SELL signals with multiple confirmations
+        sell_signals = []
+        
+        # Signal 1: Death Cross + Volume + RSI
+        if (current['SMA_10'] < current['SMA_20'] and 
+            prev['SMA_10'] >= prev['SMA_20'] and 
+            current['RSI'] > 50 and current['RSI'] < 80 and
+            current['Volume_ratio'] > 1.2):
+            sell_signals.append({
                 'type': 'SELL',
-                'reason': 'Price dropped below SMA 20',
-                'strength': 'STRONG' if current['Volume'] > current['Volume_SMA'] * 1.5 else 'MODERATE',
+                'reason': 'Death Cross (SMA 10/20) with volume confirmation',
+                'strength': 'STRONG',
+                'confidence': 85,
+                'entry_price': current['Close'],
+                'stop_loss': current['Close'] * 1.015,
+                'target': current['Close'] * 0.975
+            })
+        
+        # Signal 2: MACD Bearish Crossover + RSI overbought
+        if (current['MACD'] < current['MACD_signal'] and 
+            prev['MACD'] >= prev['MACD_signal'] and 
+            current['RSI'] > 60 and current['RSI'] < 85 and
+            current['MACD_histogram'] < prev['MACD_histogram']):
+            sell_signals.append({
+                'type': 'SELL',
+                'reason': 'MACD bearish crossover with RSI overbought',
+                'strength': 'MODERATE',
+                'confidence': 75,
                 'entry_price': current['Close'],
                 'stop_loss': current['Close'] * 1.02,
                 'target': current['Close'] * 0.97
             })
-            
-        if (current['MACD'] < current['MACD_signal'] and 
-            prev['MACD'] >= prev['MACD_signal'] and 
-            current['RSI'] > 20):
-            signals['signals'].append({
+        
+        # Signal 3: Bollinger Band Upper Touch + Volume
+        if (current['Close'] < current['BB_upper'] and 
+            prev['Close'] >= prev['BB_upper'] and 
+            current['RSI'] > 65 and
+            current['Volume_ratio'] > 1.1):
+            sell_signals.append({
                 'type': 'SELL',
-                'reason': 'MACD bearish crossover',
+                'reason': 'Bollinger Band upper rejection with overbought RSI',
                 'strength': 'MODERATE',
+                'confidence': 70,
                 'entry_price': current['Close'],
-                'stop_loss': current['Close'] * 1.03,
-                'target': current['Close'] * 0.96
+                'stop_loss': current['BB_upper'] * 1.005,
+                'target': current['BB_middle']
             })
+        
+        # Signal 4: Stochastic Overbought Reversal
+        if (current['Stoch_K'] < current['Stoch_D'] and 
+            prev['Stoch_K'] >= prev['Stoch_D'] and 
+            current['Stoch_K'] > 70 and current['RSI'] > 65):
+            sell_signals.append({
+                'type': 'SELL',
+                'reason': 'Stochastic overbought reversal',
+                'strength': 'WEAK',
+                'confidence': 60,
+                'entry_price': current['Close'],
+                'stop_loss': current['Close'] * 1.025,
+                'target': current['Close'] * 0.98
+            })
+        
+        # Combine and filter signals by confidence
+        all_signals = buy_signals + sell_signals
+        high_confidence_signals = [s for s in all_signals if s.get('confidence', 0) >= 70]
+        
+        # Add best signals to result
+        signals['signals'] = sorted(high_confidence_signals, key=lambda x: x.get('confidence', 0), reverse=True)[:3]
         
         return signals
     
     def calculate_rsi(self, prices: pd.Series, window: int = 14) -> pd.Series:
-        """Calculate RSI indicator"""
+        """Calculate RSI indicator with improved accuracy"""
         delta = prices.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-        rs = gain / loss
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        
+        avg_gain = gain.rolling(window=window, min_periods=1).mean()
+        avg_loss = loss.rolling(window=window, min_periods=1).mean()
+        
+        rs = avg_gain / avg_loss
         rsi = 100 - (100 / (1 + rs))
         return rsi
     
     def calculate_macd(self, prices: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
-        """Calculate MACD indicator"""
+        """Calculate MACD indicator with enhanced parameters"""
         exp1 = prices.ewm(span=fast).mean()
         exp2 = prices.ewm(span=slow).mean()
         macd = exp1 - exp2
         macd_signal = macd.ewm(span=signal).mean()
         return macd, macd_signal
     
+    def calculate_stochastic(self, data: pd.DataFrame, k_window: int = 14, d_window: int = 3):
+        """Calculate Stochastic Oscillator"""
+        high_max = data['High'].rolling(window=k_window).max()
+        low_min = data['Low'].rolling(window=k_window).min()
+        
+        stoch_k = 100 * (data['Close'] - low_min) / (high_max - low_min)
+        stoch_d = stoch_k.rolling(window=d_window).mean()
+        
+        return stoch_k, stoch_d
+    
     def get_all_day_trading_signals(self) -> List[Dict]:
-        """Get day trading signals for all tracked stocks"""
+        """Get enhanced day trading signals for all tracked stocks"""
         all_signals = []
         
         for symbol in self.stocks:
-            signals = self.calculate_day_trading_signals(symbol)
-            if signals:
-                all_signals.append(signals)
+            try:
+                signals = self.calculate_day_trading_signals(symbol)
+                if signals and signals.get('signals'):
+                    all_signals.append(signals)
+            except Exception as e:
+                st.warning(f"Could not analyze {symbol}: {e}")
+                continue
         
         return all_signals
 
@@ -730,66 +1045,94 @@ class EmailNotifier:
         self.smtp_port = 587
     
     def send_test_email(self, user_email: str, sender_email: str, sender_password: str):
-        """Send a test email to verify email configuration"""
+        """Send a test email to verify email configuration with enhanced error handling"""
         try:
             current_time = get_current_time()
-            subject = f"Test Email - {APP_NAME} - {format_datetime(current_time, '%Y-%m-%d %H:%M %Z')}"
+            subject = f"✅ Email Test Successful - {APP_NAME} - {format_datetime(current_time, '%Y-%m-%d %H:%M %Z')}"
             
             html_content = f"""
             <html>
             <head>
                 <style>
-                    body {{ font-family: Arial, sans-serif; }}
-                    .header {{ background-color: #28a745; color: white; padding: 20px; text-align: center; }}
-                    .content {{ padding: 20px; }}
-                    .footer {{ background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #666; }}
+                    body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; }}
+                    .header {{ background: linear-gradient(135deg, #28a745, #20c997); color: white; padding: 30px; text-align: center; }}
+                    .content {{ padding: 30px; background: #f8f9fa; }}
+                    .test-box {{ background: white; border-radius: 10px; padding: 20px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+                    .success-badge {{ background: #28a745; color: white; padding: 5px 15px; border-radius: 20px; display: inline-block; }}
+                    .footer {{ background-color: #343a40; color: white; padding: 20px; text-align: center; font-size: 12px; }}
+                    .feature-list {{ margin: 15px 0; }}
+                    .feature-item {{ margin: 8px 0; padding: 5px 0; }}
                 </style>
             </head>
             <body>
                 <div class="header">
-                    <h1>Email Test Successful! ✅</h1>
-                    <p>Your email configuration is working correctly</p>
+                    <h1>🎉 Email Configuration Test Successful!</h1>
+                    <p>Your email setup is working perfectly</p>
+                    <span class="success-badge">✅ VERIFIED</span>
                 </div>
                 
                 <div class="content">
-                    <h2>Test Details</h2>
-                    <p><strong>Application:</strong> {APP_NAME} v{APP_VERSION}</p>
-                    <p><strong>Concept Owner:</strong> {APP_CONCEPT_OWNER}</p>
-                    <p><strong>Test Time:</strong> {format_datetime(current_time)}</p>
-                    <p><strong>Recipient:</strong> {user_email}</p>
+                    <div class="test-box">
+                        <h2>📊 Test Results</h2>
+                        <p><strong>Application:</strong> {APP_NAME} v{APP_VERSION}</p>
+                        <p><strong>Concept & Owner:</strong> {APP_CONCEPT_OWNER}</p>
+                        <p><strong>Test Time:</strong> {format_datetime(current_time)}</p>
+                        <p><strong>Recipient:</strong> {user_email}</p>
+                        <p><strong>Sender:</strong> {sender_email}</p>
+                        <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">✅ SUCCESS</span></p>
+                    </div>
                     
-                    <p>This test email confirms that your Gmail configuration is properly set up for receiving investment reports and day trading alerts.</p>
+                    <div class="test-box">
+                        <h3>🚀 What You Can Expect</h3>
+                        <div class="feature-list">
+                            <div class="feature-item">📈 <strong>Daily Investment Reports</strong> - Top stock recommendations with ML predictions</div>
+                            <div class="feature-item">⚡ <strong>Day Trading Alerts</strong> - Real-time buy/sell signals for top 5 stocks</div>
+                            <div class="feature-item">📊 <strong>Portfolio Analysis</strong> - Detailed CSV exports with your data</div>
+                            <div class="feature-item">🤖 <strong>AI Insights</strong> - Machine learning enhanced predictions</div>
+                            <div class="feature-item">🌍 <strong>Multi-Market Support</strong> - US, Canada, and India markets</div>
+                        </div>
+                    </div>
                 </div>
                 
                 <div class="footer">
-                    <p>Powered by {APP_NAME} | Developed by {APP_CONCEPT_OWNER}</p>
+                    <p><strong>{APP_NAME}</strong> v{APP_VERSION} | Developed by <strong>{APP_CONCEPT_OWNER}</strong></p>
+                    <p>AI-Powered Investment Analysis Platform | Build Date: {APP_BUILD_DATE}</p>
                 </div>
             </body>
             </html>
             """
             
-            # Create message
+            # Create message with better headers
             msg = MimeMultipart('alternative')
             msg['Subject'] = subject
-            msg['From'] = sender_email
+            msg['From'] = f"{APP_CONCEPT_OWNER} <{sender_email}>"
             msg['To'] = user_email
+            msg['Reply-To'] = sender_email
             
             # Attach HTML content
             html_part = MimeText(html_content, 'html')
             msg.attach(html_part)
             
-            # Send email
-            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-            server.quit()
-            
-            return True
+            # Send email with enhanced error handling
+            try:
+                server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+                server.starttls()
+                server.login(sender_email, sender_password)
+                server.send_message(msg)
+                server.quit()
+                return True, "Test email sent successfully!"
+                
+            except smtplib.SMTPAuthenticationError:
+                return False, "Authentication failed. Please check your Gmail App Password."
+            except smtplib.SMTPRecipientsRefused:
+                return False, "Recipient email address was refused by the server."
+            except smtplib.SMTPServerDisconnected:
+                return False, "SMTP server disconnected. Please try again."
+            except Exception as smtp_error:
+                return False, f"SMTP Error: {str(smtp_error)}"
             
         except Exception as e:
-            st.error(f"Test email failed: {e}")
-            return False
+            return False, f"Email configuration error: {str(e)}"
 
     def send_daily_recommendations(self, user_email: str, recommendations: List[Dict], 
                                  sender_email: str, sender_password: str, export_data: str = None):
@@ -1010,14 +1353,123 @@ def main():
     )
     
     # Initialize components
+    auth = UserAuth()
     db = DatabaseManager()
     analyzer = EnhancedStockAnalyzer()
     emailer = EmailNotifier()
     day_trader = DayTradingAnalyzer()
     exporter = ExportManager()
     
+    # Initialize session state
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+        st.session_state.user_data = None
+    
+    # Check if user is already logged in via session token
+    if not st.session_state.logged_in and 'session_token' in st.session_state:
+        is_valid, user_data = auth.verify_session(st.session_state.session_token)
+        if is_valid:
+            st.session_state.logged_in = True
+            st.session_state.user_data = user_data
+    
+    # Login/Registration Interface
+    if not st.session_state.logged_in:
+        st.title("🔐 User Login")
+        st.markdown(f"**Welcome to {APP_NAME} v{APP_VERSION}**")
+        st.markdown(f"**Concept & Owner:** {APP_CONCEPT_OWNER}")
+        
+        # Display current time from internet
+        current_time = get_current_time()
+        st.info(f"**Current Time (Accurate):** {format_datetime(current_time, '%A, %B %d, %Y at %I:%M:%S %p %Z')}")
+        
+        tab1, tab2 = st.tabs(["🔑 Login", "📝 Register"])
+        
+        with tab1:
+            st.subheader("Login to Your Account")
+            with st.form("login_form"):
+                username = st.text_input("Username", placeholder="Enter your username")
+                password = st.text_input("Password", type="password", placeholder="Enter your password")
+                submit_login = st.form_submit_button("🔑 Login", type="primary")
+                
+                if submit_login:
+                    if username and password:
+                        success, message, user_data = auth.login_user(username, password)
+                        if success:
+                            st.session_state.logged_in = True
+                            st.session_state.user_data = user_data
+                            st.session_state.session_token = user_data['session_token']
+                            st.success(f"Welcome back, {user_data['username']}!")
+                            st.rerun()
+                        else:
+                            st.error(message)
+                    else:
+                        st.error("Please fill in all fields")
+        
+        with tab2:
+            st.subheader("Create New Account")
+            with st.form("register_form"):
+                new_username = st.text_input("Choose Username", placeholder="Enter a unique username")
+                new_email = st.text_input("Email Address", placeholder="Enter your email address")
+                new_password = st.text_input("Password", type="password", placeholder="Choose a strong password")
+                confirm_password = st.text_input("Confirm Password", type="password", placeholder="Confirm your password")
+                submit_register = st.form_submit_button("📝 Register", type="primary")
+                
+                if submit_register:
+                    if new_username and new_email and new_password and confirm_password:
+                        if new_password == confirm_password:
+                            if len(new_password) >= 6:
+                                success, message = auth.register_user(new_username, new_email, new_password)
+                                if success:
+                                    st.success(f"{message} You can now login!")
+                                else:
+                                    st.error(message)
+                            else:
+                                st.error("Password must be at least 6 characters long")
+                        else:
+                            st.error("Passwords do not match")
+                    else:
+                        st.error("Please fill in all fields")
+        
+        # Information about the app
+        st.markdown("---")
+        st.subheader("🤖 About This Application")
+        st.markdown(f"""
+        **{APP_NAME}** is an advanced AI-powered investment analysis platform that provides:
+        
+        ✅ **Smart Stock Analysis** - AI/ML-driven recommendations  
+        ✅ **Day Trading Signals** - Real-time buy/sell triggers for top 5 stocks  
+        ✅ **Email Reports** - Automated daily/weekly/monthly reports  
+        ✅ **Portfolio Optimization** - Risk-adjusted investment allocations  
+        ✅ **Multi-Market Support** - US, Canadian, and Indian markets  
+        ✅ **Export Features** - Download analysis as CSV files  
+        
+        **Latest Updates in v{APP_VERSION}:**
+        """)
+        for update in VERSION_NOTES[APP_VERSION]:
+            st.markdown(f"• {update}")
+        
+        st.markdown(f"""
+        ---
+        **Concept & Owner:** {APP_CONCEPT_OWNER}  
+        **Built on:** {APP_BUILD_DATE}
+        """)
+        return
+    
+    # Main Application (for logged-in users)
     # Sidebar for user input
     st.sidebar.title("🚀 Investment Preferences")
+    
+    # User info and logout button
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown(f"**👤 Logged in as:** {st.session_state.user_data['username']}")
+        if st.button("🚪 Logout"):
+            auth.logout_user(st.session_state.session_token)
+            st.session_state.logged_in = False
+            st.session_state.user_data = None
+            if 'session_token' in st.session_state:
+                del st.session_state.session_token
+            st.rerun()
     
     # Version info in sidebar
     with st.sidebar.expander("ℹ️ App Information", expanded=False):
@@ -1036,9 +1488,9 @@ def main():
                     st.markdown(f"  • {note}")
                 st.markdown("")
     
-    # User profile inputs
-    user_name = st.sidebar.text_input("Full Name", value="")
-    user_email = st.sidebar.text_input("Email Address", value="")
+    # User profile inputs (auto-filled from logged-in user)
+    user_name = st.sidebar.text_input("Full Name", value=st.session_state.user_data['username'])
+    user_email = st.sidebar.text_input("Email Address", value=st.session_state.user_data['email'])
     
     country = st.sidebar.selectbox(
         "Select Country/Market", 
@@ -1081,15 +1533,31 @@ def main():
         sender_password = st.sidebar.text_input("Gmail App Password", type="password", 
                                                help="Use Gmail App Password, not regular password")
         
-        # Test email button
+        # Enhanced test email button
         if sender_email and sender_password and user_email:
-            if st.sidebar.button("🧪 Test Email Configuration"):
-                with st.spinner("Testing email configuration..."):
-                    success = emailer.send_test_email(user_email, sender_email, sender_password)
-                    if success:
-                        st.sidebar.success("✅ Test email sent successfully!")
-                    else:
-                        st.sidebar.error("❌ Test email failed. Check your credentials.")
+            col1, col2 = st.sidebar.columns(2)
+            with col1:
+                if st.button("🧪 Test Email", help="Send a test email to verify your configuration"):
+                    with st.spinner("Sending test email..."):
+                        success, message = emailer.send_test_email(user_email, sender_email, sender_password)
+                        if success:
+                            st.success(f"✅ {message}")
+                        else:
+                            st.error(f"❌ {message}")
+            with col2:
+                if st.button("📧 Quick Test", help="Basic connectivity test"):
+                    with st.spinner("Testing connection..."):
+                        try:
+                            # Quick SMTP test without sending email
+                            server = smtplib.SMTP('smtp.gmail.com', 587)
+                            server.starttls()
+                            server.login(sender_email, sender_password)
+                            server.quit()
+                            st.success("✅ SMTP connection successful!")
+                        except Exception as e:
+                            st.error(f"❌ Connection failed: {str(e)}")
+        else:
+            st.sidebar.info("💡 Enter email credentials above to enable testing")
     
     # Main interface
     st.title(f"🤖 {APP_NAME}")
@@ -1277,23 +1745,68 @@ def main():
             with col4:
                 st.metric("Stocks Monitored", len(DAY_TRADING_STOCKS))
             
-            # Display signals by stock
+            # Display enhanced signals by stock
             for stock_data in day_trading_signals:
                 if stock_data['signals']:
-                    with st.expander(f"📈 {stock_data['symbol']} - ${stock_data['current_price']:.2f} ({len(stock_data['signals'])} signals)"):
+                    # Enhanced stock header with more data
+                    rsi_color = "🟢" if 30 < stock_data.get('rsi', 50) < 70 else ("🔴" if stock_data.get('rsi', 50) > 70 else "🟡")
+                    volume_indicator = "🔥" if stock_data.get('volume_ratio', 1) > 1.5 else "📊"
+                    
+                    with st.expander(f"📈 {stock_data['symbol']} - ${stock_data['current_price']:.2f} | {rsi_color} RSI: {stock_data.get('rsi', 0):.1f} | {volume_indicator} Vol: {stock_data.get('volume_ratio', 1):.1f}x ({len(stock_data['signals'])} signals)"):
+                        
+                        # Technical indicators summary
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Current Price", f"${stock_data['current_price']:.2f}")
+                        with col2:
+                            rsi_val = stock_data.get('rsi', 50)
+                            rsi_status = "Overbought" if rsi_val > 70 else ("Oversold" if rsi_val < 30 else "Neutral")
+                            st.metric("RSI", f"{rsi_val:.1f}", rsi_status)
+                        with col3:
+                            vol_ratio = stock_data.get('volume_ratio', 1)
+                            vol_status = "High" if vol_ratio > 1.5 else ("Low" if vol_ratio < 0.7 else "Normal")
+                            st.metric("Volume Ratio", f"{vol_ratio:.1f}x", vol_status)
+                        with col4:
+                            macd_val = stock_data.get('macd', 0)
+                            macd_trend = "Bullish" if macd_val > 0 else "Bearish"
+                            st.metric("MACD", f"{macd_val:.3f}", macd_trend)
+                        
+                        st.markdown("---")
+                        
+                        # Display enhanced signals
                         for i, signal in enumerate(stock_data['signals']):
                             signal_color = "🟢" if signal['type'] == 'BUY' else "🔴"
-                            strength_badge = "🔥" if signal['strength'] == 'STRONG' else "📍"
+                            strength_badge = {
+                                'STRONG': "🔥",
+                                'MODERATE': "📍", 
+                                'WEAK': "⚪"
+                            }.get(signal['strength'], "📍")
+                            
+                            confidence = signal.get('confidence', 50)
+                            confidence_color = "🟢" if confidence >= 80 else ("🟡" if confidence >= 70 else "�")
+                            
+                            risk_reward = abs((signal['target'] - signal['entry_price']) / (signal['stop_loss'] - signal['entry_price']))
                             
                             st.markdown(f"""
-                            ### {signal_color} {signal['type']} Signal {strength_badge}
-                            **Strength:** {signal['strength']}  
-                            **Reason:** {signal['reason']}  
-                            **Entry Price:** ${signal['entry_price']:.2f}  
-                            **Stop Loss:** ${signal['stop_loss']:.2f}  
-                            **Target:** ${signal['target']:.2f}  
-                            **Risk/Reward:** {abs((signal['target'] - signal['entry_price']) / (signal['stop_loss'] - signal['entry_price'])):.2f}:1
-                            """)
+                            <div style="border: 2px solid {'#28a745' if signal['type'] == 'BUY' else '#dc3545'}; border-radius: 10px; padding: 15px; margin: 10px 0; background: {'#f8fff8' if signal['type'] == 'BUY' else '#fff8f8'};">
+                                <h4>{signal_color} {signal['type']} Signal {strength_badge} | {confidence_color} Confidence: {confidence}%</h4>
+                                <p><strong>🎯 Strategy:</strong> {signal['reason']}</p>
+                                <p><strong>💪 Strength:</strong> {signal['strength']} | <strong>🎯 Confidence:</strong> {confidence}%</p>
+                                
+                                <div style="display: flex; justify-content: space-between; margin: 10px 0;">
+                                    <div><strong>💰 Entry:</strong> ${signal['entry_price']:.2f}</div>
+                                    <div><strong>🛑 Stop Loss:</strong> ${signal['stop_loss']:.2f}</div>
+                                    <div><strong>🎯 Target:</strong> ${signal['target']:.2f}</div>
+                                    <div><strong>⚖️ R/R:</strong> {risk_reward:.2f}:1</div>
+                                </div>
+                                
+                                <div style="margin-top: 10px;">
+                                    <strong>📊 Potential:</strong> 
+                                    Loss: {((signal['stop_loss'] - signal['entry_price']) / signal['entry_price'] * 100):.1f}% | 
+                                    Gain: {((signal['target'] - signal['entry_price']) / signal['entry_price'] * 100):.1f}%
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
             
             # Export day trading signals
             st.subheader("📤 Export Day Trading Signals")
@@ -1509,17 +2022,6 @@ def main():
             - **Email**: SMTP Integration
             """)
             
-        st.markdown("---")
-        st.markdown("### 🚀 New Features in v2.0.0")
-        st.markdown("""
-        ✅ **Day Trading Mode** - Real-time signals for top 5 stocks  
-        ✅ **Enhanced Email System** - Test button & CSV attachments  
-        ✅ **Export Functionality** - Download analysis as CSV  
-        ✅ **Improved DateTime** - Proper timezone handling  
-        ✅ **Better UI** - Enhanced user experience  
-        ✅ **Owner Attribution** - Clear ownership and concept credits
-        """)
-        
         st.markdown("---")
         st.markdown(f"<center><i>© 2024 {APP_NAME} | Developed by {APP_CONCEPT_OWNER} | All Rights Reserved</i></center>", 
                    unsafe_allow_html=True)
